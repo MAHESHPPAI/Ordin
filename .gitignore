@@ -1,0 +1,76 @@
+# Exclude the hackerrank starter repo folder — work lives in "financial rule based/"
+hackerrank-orchestrate-september26/
+
+# HackerRank boilerplate / competition scaffolding (not authored by candidate)
+AGENTS.md
+CLAUDE.md
+*/AGENTS.md
+*/CLAUDE.md
+architecture.png
+*/architecture.png
+hackerrank_arrchitecture.png
+*/hackerrank_arrchitecture.png
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+venv/
+env/
+.env/
+.venv/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Scratch / temporary work files
+scratch/
+*/scratch/
+*/code/scratch_*.py
+*/code/scratch_*.txt
+*/code/scratch_prompt_full.txt
+*/code/debug_inspect.txt
+*/code/tmpo*/
+*/git_lost.txt
+git_lost.txt
+
+# Log and transcript (uploaded separately at submission, not source code)
+log.txt
+log.txt.lock
+*/log.txt
+*/log.txt.lock
+chat_transcript
+chat_transcript.txt
+*/chat_transcript
+*/chat_transcript.txt
+
+# Submission artifacts (generated outputs, not authored source)
+code.zip
+*/code.zip
+output.csv
+*/output.csv
+*/dataset/output.csv
+
+# Dataset provided by organizer — not authored by candidate
+*/dataset/financial_profiles.csv
+*/dataset/financial_events.csv
+*/dataset/exchange_rates.csv
+*/dataset/requests.csv
+*/dataset/sample_requests.csv
+*/dataset/request_payment_options.csv
+*/dataset/messages.csv
+*/dataset/images.csv
+*/dataset/media/
