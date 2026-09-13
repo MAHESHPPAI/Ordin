@@ -129,56 +129,59 @@ Accurately projecting recurring obligations requires separating stable contractu
   - Semi-monthly: Anchored to specific calendar dates (e.g., 1st and 15th)
   - Monthly: 27 to 32 days
 - **Volatility-Aware Amount Estimation**:
-  - Low Volatility (Coefficient of Variation $CV < 0.05$): Projected at the most recent observed amount.
+  - Low Volatility (Coefficient of Variation `CV < 0.05`): Projected at the most recent observed amount.
   - Variable Categories (utilities, dining, groceries): Modeled using median-of-3 historical observations to attenuate non-systematic spikes.
-  - High Volatility ($CV > 0.40$): Excluded from projected inflows to prevent counting speculative income.
+  - High Volatility (`CV > 0.40`): Excluded from projected inflows to prevent counting speculative income.
 - **Boundary Conditions**: Any recurring debit due on `request_date` (Day 0) is incorporated into the projection prior to computing safe headroom.
 
 ### Stage 4: Simulation & Dynamic Headroom Formulation
 The engine runs a discrete daily balance walk across the 90-day simulation horizon:
 
-$$B(0) = \text{current\_available\_balance}$$
-
-$$B(t) = B(t-1) + \sum \text{Inflows}(t) - \sum \text{Outflows}(t), \quad \forall t \in [1, 90]$$
+```text
+B(0) = current_available_balance
+B(t) = B(t - 1) + Inflows(t) - Outflows(t),  for all t in [1, 90]
+```
 
 Dynamic headroom measures the margin above the mandated reserve buffer:
 
-$$\text{Headroom}(t) = B(t) - \text{minimum\_balance\_to\_keep}$$
+```text
+Headroom(t) = B(t) - minimum_balance_to_keep
+MinHeadroom = min(Headroom(t))  over all t in [0, 90]
+AmountSafeToPay = max(0, min(RequestedAmount, MinHeadroom))
+```
 
-$$\text{MinHeadroom} = \min_{0 \le t \le 90} \text{Headroom}(t)$$
-
-$$\text{AmountSafeToPay} = \max\left(0, \min\left(\text{RequestedAmount}, \text{MinHeadroom}\right)\right)$$
-
-To determine `earliest_date_for_full_payment`, the engine performs an iterative forward chronological search. For each candidate day $d \in [0, 90]$, a debit of $\text{RequestedAmount}$ is simulated at day $d$. If the post-transaction balance satisfies $B'(t) \ge \text{minimum\_balance\_to\_keep}$ for all $t \ge d$, then $d$ is accepted as the earliest viable settlement date.
+To determine `earliest_date_for_full_payment`, the engine performs an iterative forward chronological search. For each candidate day `d` in `[0, 90]`, a debit of `RequestedAmount` is simulated at day `d`. If the post-transaction balance satisfies `B'(t) >= minimum_balance_to_keep` for all `t >= d`, then `d` is accepted as the earliest viable settlement date.
 
 ### Stage 5: Candidate Generation & Replay Safety
 The engine generates candidate financing paths and validates each by simulating the exact cash flow modifications:
-- **`full_payment`**: Feasible if and only if $\text{AmountSafeToPay} == \text{RequestedAmount}$.
+- **`full_payment`**: Feasible if and only if `AmountSafeToPay == RequestedAmount`.
 - **`installments`**: For each financing structure in `request_payment_options.csv`, the engine verifies:
-  1. The final payment date satisfies $d_{\text{final}} \le \text{desired\_completion\_date}$.
-  2. Each scheduled payment $p_i = (d_i, a_i)$ is injected into the forward ledger and replayed. The candidate is admitted only if balance non-negativity and reserve invariants hold across all 90 days.
-- **`partial_payment`**: Evaluated if permitted by request configuration and user preferences. Splits payment into $\text{AmountSafeToPay}$ at Day 0, and the remainder at `earliest_date_for_full_payment`.
+  1. The final payment date satisfies `final_date <= desired_completion_date`.
+  2. Each scheduled payment `p_i = (date_i, amount_i)` is injected into the forward ledger and replayed. The candidate is admitted only if balance non-negativity and reserve invariants hold across all 90 days.
+- **`partial_payment`**: Evaluated if permitted by request configuration and user preferences. Splits payment into `AmountSafeToPay` at Day 0, and the remainder at `earliest_date_for_full_payment`.
 - **`wait`**: Defers execution to a single payment on `earliest_date_for_full_payment`, provided that date is prior to the user's completion deadline.
 - **`spending_change`**: When baseline paths are unviable, the engine searches non-essential flexible categories (e.g., dining, subscriptions) and calculates minimal reduction schedules (up to 3 actions). A full replay is executed to confirm that the proposed austerity unlocks affordability.
 
 ### Stage 6: Lexicographic Multi-Objective Decision Policy
 When multiple safe candidates exist, selection is determined using a strict lexicographic preference vector:
 
-$$\text{Candidate Priority} = \min \Big( K_1, K_2, K_3, K_4, K_5, K_6 \Big)$$
+```text
+Candidate Priority = min(K_1, K_2, K_3, K_4, K_5, K_6)
+```
 
-1. **Completion Constraint ($K_1$)**: Plan completes full obligation on or before `desired_completion_date` (`True < False`).
-2. **Austerity Minimization ($K_2$)**: Plan requires no discretionary spending reductions (`True < False`).
-3. **Total Cost of Capital ($K_3$)**: Total monetary outflow (principal plus interest/fees) in ascending numerical order.
-4. **Temporal Proximity ($K_4$)**: Earliest plan start date in ascending chronological order.
-5. **Operational Simplicity ($K_5$)**: Fewest total number of disbursements in ascending order.
-6. **Deterministic Tie-Breaking ($K_6$)**: Numerical value of `payment_option_id` parsed as an integer (preventing lexicographical string comparison errors like `"payment_option_10"` sorting before `"payment_option_2"`).
+1. **Completion Constraint (K_1)**: Plan completes full obligation on or before `desired_completion_date` (`True < False`).
+2. **Austerity Minimization (K_2)**: Plan requires no discretionary spending reductions (`True < False`).
+3. **Total Cost of Capital (K_3)**: Total monetary outflow (principal plus interest/fees) in ascending numerical order.
+4. **Temporal Proximity (K_4)**: Earliest plan start date in ascending chronological order.
+5. **Operational Simplicity (K_5)**: Fewest total number of disbursements in ascending order.
+6. **Deterministic Tie-Breaking (K_6)**: Numerical value of `payment_option_id` parsed as an integer (preventing lexicographical string comparison errors like `"payment_option_10"` sorting before `"payment_option_2"`).
 
 ### Stage 7: Grounded Explanation & Invariant Validation Gate
 - **Explanation Generation**: Explanations are populated from deterministic, fact-grounded templates based on the chosen recommendation method. Every explanation explicitly quotes actual computed figures, currencies, schedule dates, and relevant account constraints. No synthetic text is generated.
 - **Invariant Validation Gate (`validate.py`)**: Prior to production execution, an invariant suite validates that:
   - All statuses and payment methods belong to allowed enumerated sets.
-  - $0 \le \text{amount\_safe\_to\_pay} \le \text{requested\_amount}$.
-  - Chronological sequences are monotonic ($t_{\text{request}} \le t_{\text{earliest}} \le t_{\text{deadline}}$).
+  - `0 <= amount_safe_to_pay <= requested_amount`.
+  - Chronological sequences are monotonic (`request_date <= earliest_date <= desired_completion_date`).
   - Recommended payment plans strictly align with the output payment method.
   - Reserve balance constraints are preserved across all intermediate trajectory steps.
 
