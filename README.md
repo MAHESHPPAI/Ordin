@@ -337,6 +337,38 @@ Static affordability models often compare total monthly income against total mon
 
 ---
 
+## Author
+
+**Mahesh P Pai**
+- GitHub: [@MAHESHPPAI](https://github.com/MAHESHPPAI)
+
+---
+
+## Contributing
+
+Contributions are welcome. If you would like to contribute:
+
+1. Fork the repository.
+2. Create a dedicated branch (`git checkout -b feature/improvement`).
+3. Ensure all test suites pass:
+   ```bash
+   python code/test_stage0.py
+   python code/test_stage1.py
+   python code/test_stage2.py
+   python code/test_stage3.py
+   python code/test_stage4.py
+   python code/test_stage5.py
+   python code/test_stage6.py
+   python code/test_stage7.py
+   python code/validate.py
+   ```
+4. Commit changes with clear, structured messages.
+5. Open a Pull Request describing the modifications, test results, and rationale.
+
+For significant algorithm changes or schema updates, please open an issue first to discuss the design.
+
+---
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
