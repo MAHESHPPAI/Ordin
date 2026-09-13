@@ -231,6 +231,7 @@ Candidate Priority = min(K_1, K_2, K_3, K_4, K_5, K_6)
 │   └── media/images/           Source document images
 ├── output.csv                  Authoritative output predictions
 ├── architecture.png            High-level data flow and pipeline architecture diagram
+├── LICENSE                     Open-source license terms (MIT)
 └── README.md                   Technical documentation
 ```
 
@@ -333,3 +334,9 @@ Combining all income into an aggregate time series leads to severe cadence disto
 
 ### Full Simulation Replay vs. Static Budget Heuristics
 Static affordability models often compare total monthly income against total monthly expenses. This ignores intra-month cash flow troughs: an expense might be safe on the 28th after payday, but cause an overdraft on the 12th when rent is due. Replaying candidate payment schedules directly against the daily simulated balance path ensures safety at every single point in time across the entire horizon.
+
+---
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
