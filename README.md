@@ -1,4 +1,4 @@
-# CashPath: Deterministic Financial Affordability & Cash Flow Simulation Engine
+# Ordin: Deterministic Financial Affordability & Cash Flow Simulation Engine
 
 A high-performance, deterministic financial planning engine that evaluates whether a user can safely afford a discretionary expense. The system simulates discrete daily cash flows across a 90-day forward horizon, resolves asynchronous and conflicting financial ledgers, evaluates multi-option installment structures, and applies a strict lexicographic policy to select the optimal payment path without language model dependencies or floating-point rounding errors.
 
@@ -22,7 +22,7 @@ A high-performance, deterministic financial planning engine that evaluates wheth
 
 Discretionary affordability assessment cannot be reliably solved by checking point-in-time account balances or prompting generative language models. A positive balance today can lead to overdraft next week if recurring commitments, pending ledger debits, and variable cost dynamics are unaccounted for.
 
-CashPath solves this through a multi-period liquidity constrained simulation framework:
+Ordin solves this through a multi-period liquidity constrained simulation framework:
 
 1. **Exact Numerical Invariants**: All monetary amounts, currency exchange computations, and balance trajectories are maintained using Python `Decimal`. Floating-point binary representation (`float64`) introduces cumulative rounding errors that alter affordability boundaries.
 2. **Conflict-Aware Ledger Reconstruction**: Real-world transaction logs contain cancellations, reversals, pending holds, and asynchronous updates. A four-tier precedence hierarchy reconstructs an authoritative financial state.
