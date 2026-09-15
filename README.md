@@ -1,6 +1,47 @@
-# Ordin: Deterministic Financial Affordability & Cash Flow Simulation Engine
+# Ordin — Financial Affordability Engine
 
-A high-performance, deterministic financial planning engine that evaluates whether a user can safely afford a discretionary expense. The system simulates discrete daily cash flows across a 90-day forward horizon, resolves asynchronous and conflicting financial ledgers, evaluates multi-option installment structures, and applies a strict lexicographic policy to select the optimal payment path without language model dependencies or floating-point rounding errors.
+Ordin is a deterministic financial planning engine that evaluates whether a purchase is affordable based on a user's current balance, upcoming expenses, expected income, and available payment options.
+
+Instead of looking only at the current bank balance, Ordin simulates financial activity over the next 90 days to evaluate different payment scenarios.
+
+For each request, the engine determines whether the purchase can be made immediately, whether waiting would make it affordable, or whether a partial payment or installment plan is a suitable option.
+
+The system also calculates how much can safely be spent today, identifies the earliest date for full payment, and provides an explanation based on the financial calculations behind the recommendation.
+
+---
+
+## Problem
+
+A purchase may appear affordable based on the current account balance but leave insufficient funds for upcoming bills.
+
+For example, a user might have enough money to buy something today but still need to pay rent, electricity bills, or other obligations before the next salary arrives.
+
+Accurately evaluating affordability requires more than comparing the purchase price against the available balance. The timing of income and expenses, recurring payments, pending transactions, refunds, and the user's minimum balance requirement must also be considered.
+
+Financial histories can contain duplicate transactions, pending authorization holds, reversed charges, and conflicting updates. Additional information may arrive through unstructured sources such as bank SMS messages, receipts, and salary documents.
+
+These records need to be processed carefully before they can be used in a financial calculation.
+
+Ordin addresses these problems through structured data processing, recurring cash flow forecasting, forward simulation, and deterministic decision rules.
+
+---
+
+## Overview
+
+The engine processes financial information through eight stages, from data ingestion and conflict resolution to forecasting, payment plan generation, decision-making, and validation.
+
+The main outputs include:
+- Affordability classification.
+- Amount safe to spend today.
+- Earliest date for full payment.
+- Recommended payment method.
+- Payment schedule and associated costs.
+- Suggested reductions in discretionary spending, when applicable.
+- A fact-grounded explanation of the recommendation.
+
+The financial decision path does not use language models. It relies on explicit rules, Python's `Decimal` arithmetic, and a 90-day cash flow simulation.
+
+Given the same normalized inputs and configuration, the engine produces the same decision.
 
 ---
 
@@ -8,92 +49,87 @@ A high-performance, deterministic financial planning engine that evaluates wheth
 
 | Parameter | Specification |
 |---|---|
-| Runtime Environment | Python 3.9+ |
-| Execution Latency | ~1.7 seconds total across 250 requests (~6.8 ms per evaluation) |
-| Numerical Precision | Arbitrary-precision fixed-point arithmetic via Python `Decimal` (`ROUND_HALF_UP`) |
-| Forecasting Horizon | 90 days discrete daily liquidity walk |
-| Model Invocations | 0 LLM calls (100% deterministic, zero inference cost, zero stochastic drift) |
-| Core Dependencies | `pandas`, `opencv-python`, `pytesseract`, `pillow` |
-| Test Coverage | 8 dedicated stage verification suites (`test_stage0.py` to `test_stage7.py`) + formal validation gate |
-
----
-
-## Engineering Overview
-
-Discretionary affordability assessment cannot be reliably solved by checking point-in-time account balances or prompting generative language models. A positive balance today can lead to overdraft next week if recurring commitments, pending ledger debits, and variable cost dynamics are unaccounted for.
-
-Ordin solves this through a multi-period liquidity constrained simulation framework:
-
-1. **Exact Numerical Invariants**: All monetary amounts, currency exchange computations, and balance trajectories are maintained using Python `Decimal`. Floating-point binary representation (`float64`) introduces cumulative rounding errors that alter affordability boundaries.
-2. **Conflict-Aware Ledger Reconstruction**: Real-world transaction logs contain cancellations, reversals, pending holds, and asynchronous updates. A four-tier precedence hierarchy reconstructs an authoritative financial state.
-3. **Multi-Stream Periodic Recurrence**: Income and expenses are decoupled into independent periodic streams using interval clustering, variation coefficient analysis, and outlier-resistant estimators (median-of-3), preventing false cadence aggregation across dual-earner households.
-4. **Day-by-Day Dynamic Headroom Walk**: 90-day liquidity simulation computes the minimum safety buffer over all future days, identifying safe-to-spend amounts and earliest full payment dates.
-5. **Discrete Payment Replay Simulation**: Every candidate financing structure (full payment, split disbursements, multi-month installment schedules, and discretionary spending reductions) is replayed through the daily ledger simulation to guarantee solvency invariants before recommendation.
-6. **Lexicographic Optimization**: Candidate payment plans are sorted across a deterministic 6-tier preference tuple, eliminating heuristic ambiguity.
+| Runtime environment | Python 3.9+ |
+| Forecasting horizon | 90 days |
+| Simulation | Discrete daily liquidity walk |
+| Numerical precision | Python `Decimal` with `ROUND_HALF_UP` |
+| Decision path | Deterministic, with no LLM calls |
+| Core dependencies | `pandas`, `opencv-python`, `pytesseract`, `pillow` |
+| Benchmark dataset | 250 financial requests |
+| Reference validation | 25 sample scenarios |
+| Average benchmark latency | 6.88 ms per request |
+| Total benchmark runtime | Approximately 1.72 seconds |
+| Test suites | Eight stage-specific verification suites |
 
 ---
 
 ## System Architecture
 
-![System Architecture](architecture.png)
+The system is organized into eight sequential stages. Each stage has a specific responsibility and passes its output to the next stage through defined interfaces.
 
-The pipeline executes as a strictly decoupled 8-stage directed sequence. Each stage adheres to an explicit interface contract verified by an isolated test harness.
+![System Architecture](architecture.png)
 
 ```text
 +-------------------------------------------------------------------------+
 | Stage 0: Canonical Ingestion & FX Normalization                         |
 | (data_io.py, money.py, canonical.py)                                    |
-| Converts raw logs to typed CanonicalEvent models; applies FX conversions|
+| Converts raw records into typed CanonicalEvent objects                  |
+| Normalizes monetary values using dated exchange rates                   |
 +------------------------------------+------------------------------------+
                                      |
                                      v
 +------------------------------------+------------------------------------+
 | Stage 1: Conflict Resolution & Ledger Cleaning                          |
 | (event_cleaner.py)                                                      |
-| Reconciles reversals, resolves event links, drops superseded records    |
+| Reconciles reversals, resolves event links, and removes superseded      |
+| records                                                                 |
 +------------------------------------+------------------------------------+
                                      |
                                      v
 +------------------------------------+------------------------------------+
 | Stage 2: Deterministic Evidence Extraction                              |
 | (message_parser.py, image_ocr.py)                                       |
-| Extracts amounts/dates from SMS/OCR; isolates untrusted content         |
+| Extracts financial facts from messages and images                       |
+| Treats external text as untrusted data                                  |
 +------------------------------------+------------------------------------+
                                      |
                                      v
 +------------------------------------+------------------------------------+
 | Stage 3: Recurrence Inference & Cash Flow Projection                    |
 | (recurrence.py, forecaster.py)                                          |
-| Clusters cadence (weekly/biweekly/monthly); projects 90-day baseline    |
+| Identifies recurring income and expenses                                |
+| Projects the next 90 days of baseline cash flows                        |
 +------------------------------------+------------------------------------+
                                      |
                                      v
 +------------------------------------+------------------------------------+
 | Stage 4: Simulation & Liquidity Headroom Engine                         |
 | (simulator.py, safe_amount.py)                                          |
-| Daily balance walk; calculates min headroom & earliest safe date        |
+| Simulates daily balances and calculates safe spending                   |
+| Identifies the earliest date for full payment                           |
 +------------------------------------+------------------------------------+
                                      |
                                      v
 +------------------------------------+------------------------------------+
 | Stage 5: Candidate Generation & Replay Verification                     |
 | (planner.py, deadline_filter.py)                                        |
-| Generates candidate plans (full, installment, partial, wait, austerity) |
-| Replays each candidate through simulator to verify safety               |
+| Generates full, partial, installment, wait, and spending-change plans   |
+| Replays candidates to verify financial constraints                      |
 +------------------------------------+------------------------------------+
                                      |
                                      v
 +------------------------------------+------------------------------------+
 | Stage 6: Lexicographic Decision Policy                                  |
 | (policy.py)                                                             |
-| Ranks safe candidates via deterministic multi-objective tuple           |
+| Ranks eligible candidates using a deterministic preference order        |
 +------------------------------------+------------------------------------+
                                      |
                                      v
 +------------------------------------+------------------------------------+
 | Stage 7: Fact-Grounded Explanation & Invariant Gate                     |
 | (explanation.py, validate.py, main.py)                                  |
-| Synthesizes grounded explanation text; validates structural invariants  |
+| Generates explanations from computed results                            |
+| Validates output structure and financial invariants                     |
 +-------------------------------------------------------------------------+
 ```
 
@@ -101,89 +137,300 @@ The pipeline executes as a strictly decoupled 8-stage directed sequence. Each st
 
 ## Detailed Pipeline Engineering
 
-### Stage 0: Canonical Ingestion & FX Normalization
-- **Typed Event Schema**: Raw transaction rows are parsed into immutable `CanonicalEvent` dataclasses with strict type validation.
-- **FX Triangular Conversion**: Cross-currency transactions are converted into the user's home currency using exact date-matched exchange rates from `exchange_rates.csv`. If direct rate `A -> B` is unavailable, the reciprocal `1 / (B -> A)` is computed at arbitrary precision with `ROUND_HALF_UP`.
-- **Zero Floating-Point Leakage**: Standard numeric casting (`float()`) is strictly prohibited. All values enter and exit as `Decimal`.
+### Stage 0 — Canonical Ingestion & FX Normalization
+**Files:** `data_io.py`, `money.py`, `canonical.py`
 
-### Stage 1: Event Cleaning & Conflict Resolution
-Real-world event histories contain duplicate submissions, pending authorization holds, and retroactive corrections. `event_cleaner.py` enforces a 4-tier precedence state machine:
-1. **Explicit Precedence**: Explicit cancellations, settlements, and amendments override earlier states.
-2. **Temporal Precedence**: For identical source and event keys, the record with the newer timestamp takes priority.
-3. **Settlement Precedence**: Fully settled transactions take precedence over projected or estimated events.
-4. **Conservative Tie-Breaking**: When conflicting records cannot be reconciled, the system selects the financially conservative interpretation (preserving lower available liquidity).
+The first stage converts raw financial records into a consistent representation that can be used throughout the pipeline.
 
-The engine links transaction chains via `linked_event_id` and anchors the baseline starting point to `current_available_balance` from the user profile on `request_date`, avoiding historical replay desynchronization.
+Raw transaction rows are parsed into immutable `CanonicalEvent` dataclasses with strict type validation. Monetary values are normalized into the user's home currency.
 
-### Stage 2: Evidence Extraction (Zero-LLM)
-External evidence (banking notifications, salary letters, payment receipts) is ingested without generative language models to prevent prompt-injection exploits and non-deterministic extraction:
-- **Message Parsing (`message_parser.py`)**: 50+ pre-compiled regular expressions extract structured financial facts (salary adjustments, transaction cancellations, payment deferrals) across multi-lingual inputs (English and Indonesian). All free text is treated as untrusted data; instructions inside messages cannot override internal policy logic.
-- **OCR Ingestion (`image_ocr.py`)**: Tesseract OCR combined with OpenCV thresholding and morphological filtering extracts tabular amounts and dates from uploaded documentation. A deterministic override table ensures exact reproducibility across pre-indexed system media.
+#### Foreign exchange conversion
+Cross-currency transactions are converted using dated exchange rates from `exchange_rates.csv`.
 
-### Stage 3: Recurrence Detection & 90-Day Cash Flow Projection
-Accurately projecting recurring obligations requires separating stable contractual obligations from discretionary spending:
-- **Multi-Stream Separation**: Dual-earner households often receive salaries on differing schedules. Clustering algorithms isolate distinct income streams by employer identity and interval patterns, preventing false high-frequency cadence detection.
-- **Cadence Identification**: Transaction deltas are classified into discrete intervals:
-  - Weekly: 6 to 8 days
-  - Biweekly: 13 to 16 days
-  - Semi-monthly: Anchored to specific calendar dates (e.g., 1st and 15th)
-  - Monthly: 27 to 32 days
-- **Volatility-Aware Amount Estimation**:
-  - Low Volatility (Coefficient of Variation `CV < 0.05`): Projected at the most recent observed amount.
-  - Variable Categories (utilities, dining, groceries): Modeled using median-of-3 historical observations to attenuate non-systematic spikes.
-  - High Volatility (`CV > 0.40`): Excluded from projected inflows to prevent counting speculative income.
-- **Boundary Conditions**: Any recurring debit due on `request_date` (Day 0) is incorporated into the projection prior to computing safe headroom.
+When a direct conversion rate is unavailable, the engine can use the reciprocal of the reverse rate:
 
-### Stage 4: Simulation & Dynamic Headroom Formulation
-The engine runs a discrete daily balance walk across the 90-day simulation horizon:
+```text
+A -> B = 1 / (B -> A)
+```
+
+The reciprocal is calculated using `Decimal` arithmetic and the configured rounding policy.
+
+All monetary values are processed using `Decimal` rather than standard binary floating-point values.
+
+This stage establishes the common data format and monetary representation used by the remaining stages.
+
+### Stage 1 — Event Cleaning & Conflict Resolution
+**File:** `event_cleaner.py`
+
+Financial histories may contain multiple records describing the same transaction or financial event.
+
+A card payment, for example, might first appear as a pending authorization and later as a settled transaction. A transaction may also be cancelled or amended after its original record was created.
+
+Ordin uses a four-tier precedence system to resolve these conflicts:
+1. **Explicit precedence:** cancellations, settlements, and amendments override earlier states.
+2. **Temporal precedence:** newer records take priority when they refer to the same source and event.
+3. **Settlement precedence:** fully settled transactions take priority over projected or estimated events.
+4. **Conservative tie-breaking:** unresolved conflicts are interpreted in a way that preserves lower available liquidity.
+
+Related transactions are linked using `linked_event_id`.
+
+The starting balance is anchored to `current_available_balance` from the user's financial profile on the request date. This avoids replaying historical transactions on top of a balance that already includes them.
+
+### Stage 2 — Deterministic Evidence Extraction
+**Files:** `message_parser.py`, `image_ocr.py`
+
+Some financial information is available only through unstructured sources, such as banking notifications, salary letters, receipts, and payment confirmations.
+
+This stage extracts relevant financial facts from messages and images without using generative language models.
+
+#### Message parsing
+The message parser uses more than 50 precompiled regular expressions to identify structured financial information from supported English and Indonesian message formats.
+
+Extracted information includes:
+- Salary adjustments.
+- Transaction cancellations.
+- Payment deferrals.
+- Financial amounts and dates.
+
+Messages are treated as untrusted data. Instructions contained within a message cannot modify the engine's internal decision rules.
+
+#### Image processing and OCR
+The OCR pipeline combines Tesseract with OpenCV image processing to extract amounts and dates from uploaded documents.
+
+Image thresholding and morphological filtering help prepare documents for text extraction.
+
+A deterministic override table is also used for known test images to ensure reproducible extraction results.
+
+Extracted information is passed to the financial processing stages for further validation and evaluation.
+
+### Stage 3 — Recurrence Inference & Cash Flow Projection
+**Files:** `recurrence.py`, `forecaster.py`
+
+This stage identifies recurring income and expenses and uses them to construct a 90-day baseline cash flow forecast.
+
+The forecasting process separates stable contractual obligations from discretionary spending and handles different income streams independently.
+
+#### Income stream separation
+Different income sources may follow different payment schedules.
+
+For example, a household might receive one salary every two weeks and another once a month. Combining both streams without considering their individual schedules could create projected paydays that do not correspond to actual income events.
+
+Ordin separates recurring streams using employer identity and observed interval patterns.
+
+#### Cadence identification
+Transaction intervals are classified into the following categories:
+
+| Cadence | Detection Interval |
+|---|---|
+| Weekly | 6–8 days |
+| Biweekly | 13–16 days |
+| Semi-monthly | Anchored to specific calendar dates |
+| Monthly | 27–32 days |
+
+Semi-monthly payments are handled separately from monthly intervals because they may occur on fixed calendar dates, such as the 1st and 15th.
+
+#### Amount estimation
+Different estimation rules are applied depending on the variability of observed amounts:
+- **Low volatility (`CV < 0.05`):** uses the most recent observed amount.
+- **Variable categories:** uses the median of three historical observations.
+- **High volatility (`CV > 0.40`):** excludes uncertain income from projected inflows.
+
+The coefficient of variation (`CV`) is used to assess the variability of historical amounts.
+
+The median-based approach is used for categories such as utilities, dining, and groceries to reduce the effect of unusually large observations.
+
+#### Boundary conditions
+Recurring debits due on the request date, or Day 0, are included in the projection before safe spending is calculated.
+
+This prevents an expense due immediately from being ignored during the affordability calculation.
+
+### Stage 4 — Simulation & Liquidity Headroom
+**Files:** `simulator.py`, `safe_amount.py`
+
+The simulation stage evaluates the user's projected financial position over the 90-day horizon.
+
+The engine starts with the current available balance and updates it as income and expenses occur.
+
+#### Daily balance calculation
 
 ```text
 B(0) = current_available_balance
-B(t) = B(t - 1) + Inflows(t) - Outflows(t),  for all t in [1, 90]
+B(t) = B(t - 1) + Inflows(t) - Outflows(t)
 ```
 
-Dynamic headroom measures the margin above the mandated reserve buffer:
+Where:
+- `B(t)` is the projected balance on day `t`.
+- `Inflows(t)` represents income and other incoming funds.
+- `Outflows(t)` represents expenses and other outgoing funds.
+
+The simulation evaluates each day from Day 0 through Day 90.
+
+#### Safe spending calculation
+The user's minimum required balance acts as a reserve that should remain available after the purchase.
+
+The headroom at each point in the forecast is calculated as:
 
 ```text
 Headroom(t) = B(t) - minimum_balance_to_keep
-MinHeadroom = min(Headroom(t))  over all t in [0, 90]
+MinHeadroom = min(Headroom(t))
 AmountSafeToPay = max(0, min(RequestedAmount, MinHeadroom))
 ```
 
-To determine `earliest_date_for_full_payment`, the engine performs an iterative forward chronological search. For each candidate day `d` in `[0, 90]`, a debit of `RequestedAmount` is simulated at day `d`. If the post-transaction balance satisfies `B'(t) >= minimum_balance_to_keep` for all `t >= d`, then `d` is accepted as the earliest viable settlement date.
+This calculation identifies the maximum amount that can be spent immediately without violating the reserve requirement anywhere in the baseline forecast.
 
-### Stage 5: Candidate Generation & Replay Safety
-The engine generates candidate financing paths and validates each by simulating the exact cash flow modifications:
-- **`full_payment`**: Feasible if and only if `AmountSafeToPay == RequestedAmount`.
-- **`installments`**: For each financing structure in `request_payment_options.csv`, the engine verifies:
-  1. The final payment date satisfies `final_date <= desired_completion_date`.
-  2. Each scheduled payment `p_i = (date_i, amount_i)` is injected into the forward ledger and replayed. The candidate is admitted only if balance non-negativity and reserve invariants hold across all 90 days.
-- **`partial_payment`**: Evaluated if permitted by request configuration and user preferences. Splits payment into `AmountSafeToPay` at Day 0, and the remainder at `earliest_date_for_full_payment`.
-- **`wait`**: Defers execution to a single payment on `earliest_date_for_full_payment`, provided that date is prior to the user's completion deadline.
-- **`spending_change`**: When baseline paths are unviable, the engine searches non-essential flexible categories (e.g., dining, subscriptions) and calculates minimal reduction schedules (up to 3 actions). A full replay is executed to confirm that the proposed austerity unlocks affordability.
+#### Earliest date for full payment
+The engine searches forward through the forecast to identify the earliest date on which the full purchase can be made.
 
-### Stage 6: Lexicographic Multi-Objective Decision Policy
-When multiple safe candidates exist, selection is determined using a strict lexicographic preference vector:
+For each candidate day `d`, the requested amount is deducted from the projected balance and the remaining cash flows are simulated.
+
+A date is accepted only if:
 
 ```text
-Candidate Priority = min(K_1, K_2, K_3, K_4, K_5, K_6)
+B'(t) >= minimum_balance_to_keep
 ```
 
-1. **Completion Constraint (K_1)**: Plan completes full obligation on or before `desired_completion_date` (`True < False`).
-2. **Austerity Minimization (K_2)**: Plan requires no discretionary spending reductions (`True < False`).
-3. **Total Cost of Capital (K_3)**: Total monetary outflow (principal plus interest/fees) in ascending numerical order.
-4. **Temporal Proximity (K_4)**: Earliest plan start date in ascending chronological order.
-5. **Operational Simplicity (K_5)**: Fewest total number of disbursements in ascending order.
-6. **Deterministic Tie-Breaking (K_6)**: Numerical value of `payment_option_id` parsed as an integer (preventing lexicographical string comparison errors like `"payment_option_10"` sorting before `"payment_option_2"`).
+for every simulated day `t >= d`.
 
-### Stage 7: Grounded Explanation & Invariant Validation Gate
-- **Explanation Generation**: Explanations are populated from deterministic, fact-grounded templates based on the chosen recommendation method. Every explanation explicitly quotes actual computed figures, currencies, schedule dates, and relevant account constraints. No synthetic text is generated.
-- **Invariant Validation Gate (`validate.py`)**: Prior to production execution, an invariant suite validates that:
-  - All statuses and payment methods belong to allowed enumerated sets.
-  - `0 <= amount_safe_to_pay <= requested_amount`.
-  - Chronological sequences are monotonic (`request_date <= earliest_date <= desired_completion_date`).
-  - Recommended payment plans strictly align with the output payment method.
-  - Reserve balance constraints are preserved across all intermediate trajectory steps.
+The first date satisfying this condition becomes `earliest_date_for_full_payment`.
+
+### Stage 5 — Candidate Generation & Replay Verification
+**Files:** `planner.py`, `deadline_filter.py`
+
+Once the baseline forecast is available, the engine generates possible payment plans.
+
+Each candidate is evaluated against the user's preferences, completion deadline, and financial constraints.
+
+#### Full payment
+A full payment candidate is eligible only when:
+
+```text
+AmountSafeToPay == RequestedAmount
+```
+
+#### Installment plans
+Installment options are loaded from `request_payment_options.csv`.
+
+For each option, the engine checks:
+1. The final payment date is on or before the requested completion deadline.
+2. Each scheduled payment is inserted into the projected ledger.
+3. The complete payment schedule is replayed through the simulator.
+4. The candidate satisfies the required balance constraints throughout the 90-day horizon.
+
+The entire payment schedule must be feasible, not just the initial installment.
+
+#### Partial payment
+Partial payment is evaluated when permitted by the request configuration and user preferences.
+
+The plan divides the purchase into two payments:
+1. An initial payment equal to the amount safe to spend today.
+2. A remaining payment on the earliest date the full purchase becomes affordable.
+
+The resulting schedule is replayed to verify its safety.
+
+#### Waiting
+The wait candidate defers the purchase until `earliest_date_for_full_payment`.
+
+It is eligible only if the payment date falls on or before the user's completion deadline.
+
+#### Spending changes
+When the baseline forecast does not support a viable payment option, the engine can evaluate reductions in flexible spending categories.
+
+Examples include dining and subscriptions.
+
+The planner searches for minimal reduction schedules, with up to three actions, and replays the resulting financial trajectory to determine whether the purchase becomes affordable.
+
+### Stage 6 — Lexicographic Decision Policy
+**File:** `policy.py`
+
+Several payment options may satisfy the user's financial constraints.
+
+Ordin uses a deterministic six-level ranking policy to select the preferred candidate.
+
+The policy evaluates candidates in the following order:
+
+| Priority | Criterion | Preference |
+|---|---|---|
+| K1 | Completion constraint | Meets the requested deadline |
+| K2 | Austerity minimization | Avoids discretionary spending reductions |
+| K3 | Total cost | Lower total monetary outflow |
+| K4 | Temporal proximity | Earlier plan start date |
+| K5 | Operational simplicity | Fewer individual payments |
+| K6 | Deterministic tie-breaking | Lower numerical payment option ID |
+
+The ranking is lexicographic. Each criterion is considered only after the preceding criteria have been resolved.
+
+For example, a plan that meets the completion deadline takes priority over one that does not, regardless of the latter's lower cost.
+
+The final tie-breaker uses the numerical value of `payment_option_id` rather than its string representation. This avoids incorrect ordering of identifiers such as `payment_option_10` and `payment_option_2`.
+
+Only candidates that pass the financial safety checks are considered for recommendation.
+
+### Stage 7 — Fact-Grounded Explanation & Invariant Validation
+**Files:** `explanation.py`, `validate.py`, `main.py`
+
+The final stage generates the explanation and validates the output.
+
+#### Explanation generation
+Explanations are created using deterministic templates populated with computed financial results.
+
+Depending on the recommendation, the explanation can include:
+- Relevant account balances.
+- Safe spending amount.
+- Payment method.
+- Payment schedule and dates.
+- Financial constraints that influenced the decision.
+
+The explanation uses values produced by the engine rather than generating new financial figures.
+
+#### Invariant validation
+Before the output is accepted, the validation suite checks structural and financial constraints.
+
+These include:
+- Statuses and payment methods belong to the allowed enumerated sets.
+- The safe spending amount is between zero and the requested amount.
+- The earliest payment date follows the expected chronological constraints.
+- The recommended payment plan matches the returned payment method.
+- The simulated balance respects the minimum required balance.
+
+The validation gate checks the consistency of the output. It does not independently establish that every underlying financial assumption or forecast is correct.
+
+---
+
+## Benchmark Performance & Validation Results
+
+The engine was evaluated against a set of 25 public reference scenarios.
+
+The results below represent agreement with the expected outputs for those scenarios.
+
+### Public Reference Set — 25 Scenarios
+
+| Evaluation Criterion | Correct | Accuracy |
+|---|---|---|
+| Affordability classification | 20 / 25 | 80% |
+| Payment method recommendation | 21 / 25 | 84% |
+| Payment plan structure | 18 / 25 | 72% |
+| Earliest date calculation | 20 / 25 | 80% |
+| Spending changes identification | 22 / 25 | 88% |
+| Explanation groundedness | 25 / 25 | 100% |
+
+The validation suite also reported schema and invariant adherence across all 250 production output rows.
+
+The results indicate that payment plan structure is an area for further improvement. A recommendation may classify a purchase correctly while still selecting a payment schedule that differs from the expected result.
+
+The 25-scenario reference set provides a limited evaluation of the engine. Larger and more diverse test sets would be needed to assess its performance across a wider range of financial situations.
+
+### Latency and Resource Utilization
+
+| Metric | Result |
+|---|---|
+| Total execution time | 1.72 seconds for 250 requests |
+| Average per-request latency | 6.88 milliseconds |
+| LLM calls | 0 |
+| Inference cost | $0.00 |
+
+The benchmark includes ledger cleaning, recurrence analysis, forecasting, 90-day simulation, candidate generation, and payment plan replay.
+
+The reported runtime applies to the benchmark environment and dataset. Performance may vary with hardware, input size, and workload.
 
 ---
 
@@ -192,121 +439,95 @@ Candidate Priority = min(K_1, K_2, K_3, K_4, K_5, K_6)
 ```text
 .
 ├── code/
-│   ├── main.py                 Entry point; pipeline orchestrator across Stages 0-7
-│   ├── config.py               Global configuration, paths, and immutable schema enums
-│   ├── canonical.py            Typed CanonicalEvent dataclass and field contracts
-│   ├── money.py                Fixed-point Decimal arithmetic and triangular FX conversion
-│   ├── data_io.py              Dataset loaders with schema parsing and type enforcement
-│   ├── event_cleaner.py        Stage 1: Four-tier conflict resolution state machine
-│   ├── message_parser.py       Stage 2: Deterministic regex financial fact extraction
-│   ├── image_ocr.py            Stage 2: Tesseract/OpenCV extraction with override mapping
-│   ├── recurrence.py           Stage 3: Cadence detection and variation coefficient filter
-│   ├── forecaster.py           Stage 3: 90-day baseline cash flow projection engine
-│   ├── simulator.py            Stage 4: Discrete daily balance walk simulator
-│   ├── safe_amount.py          Stage 4: Headroom calculation and earliest date search
-│   ├── deadline_filter.py      Stage 5: Candidate filtering against completion deadlines
-│   ├── planner.py              Stage 5: Candidate plan generation and simulation replay
-│   ├── policy.py               Stage 6: 6-tier lexicographic multi-objective ranking
-│   ├── explanation.py          Stage 7: Fact-grounded explanation synthesis
-│   ├── validate.py             Stage 7: Architectural invariant assertions and validation gate
-│   ├── test_stage0.py          Contract test suite: Ingestion and FX calculations
-│   ├── test_stage1.py          Contract test suite: Conflict resolution and deduplication
-│   ├── test_stage2.py          Contract test suite: Message parsing and OCR extraction
-│   ├── test_stage3.py          Contract test suite: Recurrence inference and forecasting
-│   ├── test_stage4.py          Contract test suite: Headroom math and forward simulation
-│   ├── test_stage5.py          Contract test suite: Candidate generation and replay safety
-│   ├── test_stage6.py          Contract test suite: Lexicographic decision policy
-│   ├── test_stage7.py          Contract test suite: Output formatting and explanation groundedness
+│   ├── main.py
+│   ├── config.py
+│   ├── canonical.py
+│   ├── money.py
+│   ├── data_io.py
+│   ├── event_cleaner.py
+│   ├── message_parser.py
+│   ├── image_ocr.py
+│   ├── recurrence.py
+│   ├── forecaster.py
+│   ├── simulator.py
+│   ├── safe_amount.py
+│   ├── deadline_filter.py
+│   ├── planner.py
+│   ├── policy.py
+│   ├── explanation.py
+│   ├── validate.py
+│   ├── test_stage0.py
+│   ├── test_stage1.py
+│   ├── test_stage2.py
+│   ├── test_stage3.py
+│   ├── test_stage4.py
+│   ├── test_stage5.py
+│   ├── test_stage6.py
+│   ├── test_stage7.py
 │   └── evaluation/
-│       └── usage_report.md     Token consumption audit (0 calls, $0.00 cost)
+│       └── usage_report.md
 ├── dataset/
-│   ├── requests.csv            Evaluation requests dataset (250 scenarios)
-│   ├── sample_requests.csv     Public reference verification requests (25 scenarios)
-│   ├── financial_profiles.csv  User account balances and reserve thresholds
-│   ├── financial_events.csv    Historical transaction ledgers
-│   ├── request_payment_options.csv Multi-option installment terms
-│   ├── exchange_rates.csv      Dated foreign exchange conversion rates
-│   ├── messages.csv            Unstructured customer notifications and messages
-│   ├── images.csv              Image metadata index
-│   └── media/images/           Source document images
-├── output.csv                  Authoritative output predictions
-├── architecture.png            High-level data flow and pipeline architecture diagram
-├── LICENSE                     Open-source license terms (MIT)
-└── README.md                   Technical documentation
+│   ├── requests.csv
+│   ├── sample_requests.csv
+│   ├── financial_profiles.csv
+│   ├── financial_events.csv
+│   ├── request_payment_options.csv
+│   ├── exchange_rates.csv
+│   ├── messages.csv
+│   ├── images.csv
+│   └── media/
+│       └── images/
+├── output.csv
+├── architecture.png
+├── LICENSE
+└── README.md
 ```
-
----
-
-## Benchmark Performance & Validation Results
-
-The engine was evaluated against benchmark public scenarios to verify precision, consistency, and execution speed.
-
-### Public Reference Set Accuracy (25 Scenarios)
-
-| Evaluation Criterion | Metric | Target Compliance |
-|---|---|---|
-| Affordability Classification | 20 / 25 | 80% |
-| Payment Method Recommendation | 21 / 25 | 84% |
-| Payment Plan Structure | 18 / 25 | 72% |
-| Earliest Date Calculation | 20 / 25 | 80% |
-| Spending Changes Identification | 22 / 25 | 88% |
-| Explanation Groundedness | 25 / 25 | 100% |
-| Schema & Invariant Adherence | 250 / 250 rows | 100% |
-
-### Latency and Resource Utilization
-
-- **Total Execution Time**: 1.72 seconds for all 250 production requests on standard hardware.
-- **Per-Request Latency**: 6.88 milliseconds per customer scenario (including ledger cleaning, multi-stream recurrence analysis, forward 90-day simulation, and multi-candidate replay).
-- **API Dependencies**: None.
-- **Inference Expense**: $0.00 (0 tokens utilized).
 
 ---
 
 ## Setup & Reproduction
 
 ### Prerequisites
-
-- Python 3.9 or higher
-- Tesseract OCR engine installed on system path:
-  - Linux: `sudo apt-get install tesseract-ocr`
-  - macOS: `brew install tesseract`
-  - Windows: Install via official binary release
+- Python 3.9 or higher.
+- Tesseract OCR installed and available on the system path:
+  - **Linux:** `sudo apt-get install tesseract-ocr`
+  - **macOS:** `brew install tesseract`
+  - **Windows:** Install Tesseract using an official binary distribution and add its installation directory to the system path.
 
 ### Installation
-
-Clone the repository and install required Python packages:
+Install the required Python packages:
 
 ```bash
 pip install pillow pytesseract opencv-python pandas
 ```
 
-### Running the Pipeline
-
-Execute the full production pipeline on all 250 requests:
+### Run the full pipeline
+From the project root:
 
 ```bash
 python code/main.py
 ```
 
-Results are generated at `output.csv` and `dataset/output.csv`.
+The pipeline processes the production request dataset and writes the generated predictions to:
+- `output.csv`
+- `dataset/output.csv`
 
-To execute exclusively on the 25 sample reference requests:
+### Run the sample reference set
 
 ```bash
 python code/main.py --samples
 ```
 
-### Running the Validation Gate
+This runs the pipeline using the 25 sample reference requests.
 
-Run invariant verification against the reference benchmark:
+### Run the validation gate
 
 ```bash
 python code/validate.py
 ```
 
-### Running Isolated Stage Test Suites
-
-Each stage possesses an independent test suite verifying contract integrity:
+### Run the stage-specific test suites
+Each stage has a separate verification suite:
 
 ```bash
 python code/test_stage0.py
@@ -319,21 +540,60 @@ python code/test_stage6.py
 python code/test_stage7.py
 ```
 
+The individual suites cover ingestion, conflict resolution, evidence extraction, forecasting, simulation, candidate generation, decision policy, and output validation.
+
 ---
 
 ## Engineering Design Decisions & Trade-Offs
 
-### Deterministic Simulation vs. Large Language Models
-Financial affordability decisions require mathematical certitude, legal reproducibility, and auditability. Relying on language models introduces non-deterministic hallucinations, boundary condition drift, latency overhead (several seconds per query), and susceptibility to prompt injection within transaction descriptions or SMS notices. Replacing LLM calls with compiled regular expressions and discrete ledger walks achieved 100% reproducibility, zero operational API costs, and sub-7ms latency.
+### Deterministic simulation instead of LLM-based decisions
+The financial decision path uses explicit rules and mathematical calculations rather than asking a language model to determine affordability.
 
-### Arbitrary Precision Fixed-Point (`Decimal`) vs. Floating Point (`float`)
-Binary floating point representations (IEEE 754) cannot precisely represent decimal fractions such as `0.1` or `0.01`. In a 90-day simulation with compounded transactions, floating-point drift can result in false positive or false negative violations of reserve thresholds near boundary conditions. `Decimal` arithmetic using explicit rounding modes guarantees banking-grade arithmetic consistency.
+This makes it possible to reproduce decisions, test boundary conditions, and trace recommendations back to the underlying calculations.
 
-### Separate Recurrence Streams vs. Aggregated Inflow
-Combining all income into an aggregate time series leads to severe cadence distortion when a household has multiple earners paid on different frequencies (e.g., one biweekly and one monthly). By separating transactions by description/party and identifying distinct recurrence intervals independently, the forecaster avoids generating synthetic paydays that do not exist in reality.
+Unstructured messages and documents are handled separately from the decision logic. Extracted information must be processed as financial data rather than instructions that can modify the engine's behavior.
 
-### Full Simulation Replay vs. Static Budget Heuristics
-Static affordability models often compare total monthly income against total monthly expenses. This ignores intra-month cash flow troughs: an expense might be safe on the 28th after payday, but cause an overdraft on the 12th when rent is due. Replaying candidate payment schedules directly against the daily simulated balance path ensures safety at every single point in time across the entire horizon.
+### Decimal arithmetic instead of floating-point arithmetic
+Binary floating-point arithmetic cannot represent every decimal fraction exactly.
+
+In financial calculations involving repeated transactions and reserve thresholds, rounding differences can affect whether a balance satisfies a constraint.
+
+Ordin uses Python's `Decimal` type with explicit rounding rules to make monetary calculations predictable.
+
+Currency-specific precision and rounding requirements still need to be handled appropriately for each financial operation.
+
+### Separate recurrence streams instead of aggregated income
+Combining multiple income streams into a single time series can distort their payment schedules.
+
+For example, two earners receiving salaries on different dates should not produce a projected payday that does not correspond to either salary.
+
+Ordin identifies recurring streams independently so that the forecast reflects their individual schedules.
+
+### Full simulation replay instead of static budget heuristics
+A monthly budget can appear healthy while the account balance temporarily falls below the required threshold.
+
+For example, a user may receive a salary at the beginning of the month but have rent and other bills due before the next paycheck.
+
+Comparing total monthly income against total monthly expenses would not capture this timing problem.
+
+Ordin simulates the balance over time and replays candidate payment schedules against the projected cash flows. This allows payment plans to be evaluated against the user's balance constraints throughout the forecast.
+
+---
+
+## Limitations
+
+The engine's output depends on the quality of the financial data and the assumptions used to construct the forecast.
+
+Important limitations include:
+- Recurring income and expenses are inferred from historical observations and may not continue as expected.
+- Irregular expenses and unexpected financial events may not appear in the baseline forecast.
+- High-volatility income is excluded from projected inflows, which can result in conservative recommendations.
+- Message parsing and OCR depend on supported formats and extraction rules.
+- The 90-day simulation does not account for financial events beyond its forecasting horizon.
+- The reference benchmark contains 25 scenarios and does not establish accuracy across all possible financial situations.
+- Passing structural and balance invariants does not guarantee that the underlying financial data or assumptions are correct.
+
+The engine evaluates affordability under its configured assumptions. Its recommendations should not be interpreted as guarantees about a user's future financial position.
 
 ---
 
@@ -346,29 +606,20 @@ Static affordability models often compare total monthly income against total mon
 
 ## Contributing
 
-Contributions are welcome. If you would like to contribute:
+Contributions are welcome.
 
+To contribute:
 1. Fork the repository.
-2. Create a dedicated branch (`git checkout -b feature/improvement`).
-3. Ensure all test suites pass:
-   ```bash
-   python code/test_stage0.py
-   python code/test_stage1.py
-   python code/test_stage2.py
-   python code/test_stage3.py
-   python code/test_stage4.py
-   python code/test_stage5.py
-   python code/test_stage6.py
-   python code/test_stage7.py
-   python code/validate.py
-   ```
-4. Commit changes with clear, structured messages.
-5. Open a Pull Request describing the modifications, test results, and rationale.
+2. Create a branch for the changes.
+3. Implement the required changes.
+4. Add or update the relevant tests.
+5. Run the stage-specific test suites and validation gate.
+6. Open a pull request describing the changes and their purpose.
 
-For significant algorithm changes or schema updates, please open an issue first to discuss the design.
+For significant changes to financial calculations, event schemas, or decision policies, open an issue before implementation to discuss the proposed approach.
 
 ---
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+Ordin is released under the MIT License. See the [LICENSE](LICENSE) file for details.

@@ -3,7 +3,7 @@
 ## Execution Summary
 - **Requests Evaluated**: 250
 - **Run Duration**: 1.71 seconds
-- **Average Duration per Request**: 6.9 ms
+- **Average Duration per Request**: 6.8 ms
 - **Architecture**: 100% Deterministic Algorithmic Pipeline (Stages 0–7)
 
 ## Model Usage Statistics
